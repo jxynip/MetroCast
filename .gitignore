@@ -7,6 +7,7 @@ __pycache__/
 
 # Data
 dataRaw/
+dataProcessed/
 output/
 
 # macOS
