@@ -1,0 +1,480 @@
+# Feature Engineering Plan --- Delhi Metro Rainfall Research
+
+## Objective
+
+Transform the completed metro-ridership and weather analyses into a
+model-ready dataset for forecasting Delhi Metro ridership and measuring
+whether rainfall improves prediction accuracy.
+
+The study currently covers September 2024 to February 2025. Existing
+work includes cleaned metro-ridership data, cleaned hourly weather data,
+rainfall intensity analysis, metro/rainfall analysis, and regional
+analysis. The exact dataset schemas and aggregation level must be
+verified before implementation.
+
+## 1. Overall Workflow
+
+1.  **Existing cleaned datasets**
+    -   Hourly metro ridership
+    -   Hourly weather
+    -   Regional weather data, where available
+2.  **Phase A --- Data validation and alignment**
+    -   Validate timestamps and frequency.
+    -   Check missing values and duplicate records.
+    -   Align weather and ridership timestamps.
+3.  **Phase B --- Feature construction**
+    -   Temporal features
+    -   Ridership lags
+    -   Rainfall features
+    -   Other weather features
+    -   Interaction features
+    -   Regional features
+4.  **Phase C --- Leakage prevention and feature selection**
+    -   Use only information available at prediction time.
+    -   Check redundancy and missingness.
+    -   Keep train, validation, and test procedures chronological.
+5.  **Final modeling datasets**
+    -   Baseline features
+    -   Weather-enhanced features
+    -   Regional variants
+
+## 2. Phase A --- Validate and Align the Datasets
+
+### A1. Metro Data
+
+Inspect the existing cleaned metro dataset and confirm:
+
+-   Timestamp column and time zone.
+-   Ridership aggregation interval.
+-   Whether records represent entries, exits, or both.
+-   Whether ridership is citywide, station-level, or regional.
+-   Missing hours, duplicate timestamps, and unusual zero values.
+-   Whether business-day, weekend, and holiday classifications already
+    exist.
+
+### A2. Weather Data
+
+Use the existing cleaned weather dataset and verify available fields.
+Variables previously used or considered include:
+
+-   Precipitation and rain
+-   Temperature and apparent temperature
+-   Relative humidity
+-   Wind speed
+-   Cloud cover
+-   Atmospheric pressure
+-   Visibility and weather codes
+
+Confirm units, missing values, and the precise meaning of precipitation
+versus rain. Do not count them as separate rainfall quantities if one
+already represents the other.
+
+### A3. Time Alignment
+
+-   Use a consistent hourly timestamp in `Asia/Kolkata`.
+-   Align weather and ridership using documented rules.
+-   If a source has 30-minute observations, aggregate or align it to the
+    chosen target frequency using an appropriate rule.
+-   Avoid double-counting passenger totals when aggregating.
+-   Document any dropped or unmatched timestamps.
+
+**Deliverable:** A validated hourly master dataset, with a clear
+definition of the forecasting target and one row per time unit at the
+chosen geographic level.
+
+## 3. Phase B --- Engineer the Features
+
+Create and validate each feature group independently.
+
+### B1. Temporal Features
+
+These capture recurring commuting patterns that might otherwise be
+mistaken for weather effects.
+
+  -----------------------------------------------------------------------
+  Feature                             Purpose
+  ----------------------------------- -----------------------------------
+  `hour`                              Distinguishes morning, afternoon,
+                                      and evening
+
+  `day_of_week`                       Captures weekday-specific demand
+
+  `is_weekend`                        Separates weekend behavior
+
+  `is_business_day`                   Uses the project's existing
+                                      business-day classification
+
+  `month`                             Captures monthly variation
+
+  `is_peak_hour`                      Identifies established commuting
+                                      peaks
+
+  `hour_sin`, `hour_cos`              Encodes the 24-hour cycle
+                                      continuously
+
+  `dow_sin`, `dow_cos`                Encodes the weekly cycle
+
+  `day_of_year` or trend index        Captures gradual changes over time
+  -----------------------------------------------------------------------
+
+Cyclical encoding:
+
+`hour_sin = sin(2 * pi * hour / 24)`
+
+`hour_cos = cos(2 * pi * hour / 24)`
+
+This avoids treating 23:00 and 00:00 as far apart.
+
+Peak-hour definitions should come from the completed ridership EDA or a
+documented transport convention, not from test-set performance.
+
+### B2. Historical Ridership Features
+
+Historical ridership is likely to be an important predictor in
+time-series forecasting.
+
+  Feature                     Definition
+  --------------------------- ---------------------------------------------
+  `ridership_lag_1h`          Ridership one hour earlier
+  `ridership_lag_2h`          Ridership two hours earlier
+  `ridership_lag_3h`          Ridership three hours earlier
+  `ridership_lag_24h`         Ridership at the same hour the previous day
+  `ridership_lag_168h`        Ridership at the same hour one week earlier
+  `ridership_roll_mean_3h`    Mean of the preceding three hours
+  `ridership_roll_mean_6h`    Mean of the preceding six hours
+  `ridership_roll_mean_12h`   Mean of the preceding twelve hours
+  `ridership_roll_std_6h`     Recent six-hour variability
+
+Start with 1-, 2-, and 3-hour lags and 3-, 6-, and 12-hour moving
+averages. Test 24- and 168-hour lags as additional candidates because
+metro demand may follow daily and weekly routines.
+
+For each rolling feature, exclude the current target hour. For example,
+a six-hour rolling mean must use only the six completed hours preceding
+the prediction timestamp.
+
+### B3. Rainfall Features
+
+Rainfall is the central feature group for the research hypothesis.
+
+#### 1. Current-hour and lagged rainfall
+
+Candidate features:
+
+-   `rainfall_lag_1h`
+-   `rainfall_lag_2h`
+-   `rainfall_lag_3h`
+
+Use current-hour rainfall only when it is genuinely available at
+prediction time. Otherwise, use lagged rainfall or a weather forecast.
+
+#### 2. Accumulated rainfall
+
+Candidate features:
+
+-   `rainfall_sum_3h`
+-   `rainfall_sum_6h`
+-   `rainfall_sum_12h`
+-   `rainfall_sum_24h`
+
+These can capture whether sustained rainfall has a different association
+with ridership than a brief shower.
+
+#### 3. Rainfall intensity
+
+Use the thresholds already applied in the completed analysis:
+
+  Category                Hourly rainfall
+  ---------- ----------------------------
+  No rain                            0 mm
+  Light          Greater than 0 to 2.5 mm
+  Moderate     Greater than 2.5 to 7.6 mm
+  Heavy               Greater than 7.6 mm
+
+These categories allow nonlinear relationships to be tested rather than
+assuming every additional millimetre has the same effect.
+
+#### 4. Rain-event characteristics
+
+Candidate features:
+
+-   `is_raining`
+-   `rainy_hours_last_6h`
+-   `hours_since_rain`
+-   `rain_event_duration`
+
+Define a rain event consistently, including how consecutive rainy hours
+are grouped and how a new event is separated from the previous one.
+
+Do not automatically include every candidate feature in the final model.
+Several may be highly correlated, so compare meaningful subsets during
+modeling.
+
+### B4. Other Weather Features
+
+These can help distinguish rainfall effects from broader weather
+conditions.
+
+  Feature                Rationale
+  ---------------------- -------------------------------------------
+  Temperature            Ridership may vary with heat or cold
+  Apparent temperature   Captures perceived outdoor conditions
+  Relative humidity      May add information beyond rainfall
+  Wind speed             Captures other adverse weather conditions
+  Cloud cover            Helps characterize weather conditions
+  Visibility             May indicate poor-weather conditions
+  Weather code           Represents broader weather categories
+
+Test selected lagged weather variables and rolling summaries where
+scientifically justified. Avoid creating many redundant columns before
+evaluating their value.
+
+Pressure, temperature, and humidity should not be converted into
+arbitrary categories without a reason. Continuous variables are a
+sensible starting point.
+
+### B5. Interaction Features
+
+Rainfall may have different associations with ridership depending on
+when it occurs.
+
+Test a small, interpretable set of interactions:
+
+-   `rainfall × peak_hour`
+-   `rainfall × is_business_day`
+-   `rainfall × is_weekend`
+-   `rainfall × rainfall_intensity`
+-   `rainfall × region`, if the regional modeling structure supports it
+
+For example, rainfall during a weekday morning peak may have a different
+relationship with ridership than rainfall late at night.
+
+These are hypotheses to test, not assumed findings.
+
+### B6. Regional Weather Features
+
+Carry the completed regional analysis into feature engineering rather
+than repeating the geographic EDA.
+
+For each existing region, inspect the availability of:
+
+-   Hourly precipitation
+-   Rainfall intensity
+-   Three- and six-hour rainfall totals
+-   Temperature and selected other weather variables
+-   Regional differences in rain-event timing
+
+The correct features depend on the level of the ridership target:
+
+-   **Citywide ridership:** Regional rainfall summaries could be
+    aggregated into city-level predictors.
+-   **Station-level ridership:** Associate each station with an
+    appropriate geographic weather representation.
+-   **Region-level ridership:** Join each regional ridership series with
+    its corresponding weather features.
+
+Do not assign stations to weather regions arbitrarily. Existing regional
+definitions and station mapping must support the join.
+
+### B7. Entry and Exit Targets
+
+Preserve the distinction between entries and exits where the data
+supports it.
+
+Possible target series:
+
+-   `entries`
+-   `exits`
+-   `total_ridership`, if calculated consistently from underlying
+    records
+
+Compare entries and exits separately before deciding whether a combined
+target is useful. Combining them too early could conceal different
+demand patterns.
+
+## 4. Phase C --- Prevent Data Leakage
+
+Data leakage occurs when a model uses information that would not have
+been available when making a prediction.
+
+Rules:
+
+1.  Sort observations chronologically before creating lag features.
+2.  Use only historical observations for ridership lags and rolling
+    statistics.
+3.  Do not use actual future rainfall to predict ridership unless the
+    experiment explicitly assumes that rainfall is known or forecast at
+    prediction time.
+4.  Fit imputers, scalers, and feature-selection procedures on training
+    data only.
+5.  Use chronological train/validation/test splits rather than randomly
+    shuffling hourly observations.
+6.  Keep future target values out of all predictor columns.
+
+Define two forecasting scenarios if useful:
+
+-   **Retrospective weather-informed forecasting:** Rainfall
+    observations for the relevant hour are supplied to estimate the
+    value of weather information.
+-   **Operational forecasting:** Only weather forecasts available at
+    prediction time are used.
+
+The first helps evaluate historical weather associations; the second is
+more realistic for a deployable forecasting system. Keep their
+assumptions and results clearly separated.
+
+## 5. Phase D --- Feature Selection and Diagnostics
+
+After creating candidate features, evaluate them before training final
+models.
+
+1.  **Missing-value audit:** Quantify missingness introduced by lags,
+    rolling windows, and data gaps. Do not automatically replace missing
+    rainfall with zero unless it is confirmed that no rain occurred.
+2.  **Correlation analysis:** Identify highly correlated predictors,
+    especially rainfall accumulations across overlapping windows and
+    temperature versus apparent temperature.
+3.  **Distribution checks:** Inspect skewness, zero inflation, and
+    extreme values. Rainfall is expected to contain many zero
+    observations.
+4.  **Redundancy checks:** Avoid encoding the same information
+    repeatedly through overlapping categorical and numerical variables
+    without a modeling reason.
+5.  **Feature importance:** Assess importance on validation data or with
+    suitable model-specific methods, not on the final test set.
+6.  **Ablation experiments:** Compare models using temporal features
+    alone, temporal plus historical ridership, and temporal plus
+    historical ridership plus weather.
+
+The ablation experiment is particularly important: it tests whether
+weather adds predictive value beyond ordinary daily and weekly commuting
+patterns.
+
+## 6. Phase E --- Build Separate Modeling Datasets
+
+Create controlled feature sets rather than one enormous dataset used
+indiscriminately for every model.
+
+  -----------------------------------------------------------------------
+  Dataset                 Features                Purpose
+  ----------------------- ----------------------- -----------------------
+  `baseline`              Temporal features       Establish a basic
+                                                  reference
+
+  `ridership_history`     Temporal + historical   Capture recurring
+                          ridership               demand
+
+  `weather_enhanced`      Temporal + historical   Test weather's
+                          ridership +             incremental value
+                          weather/rainfall        
+
+  `regional_weather`      Core features +         Test geographic weather
+                          regional weather        representation
+
+  `rainfall_focused`      Core features +         Examine
+                          selected rainfall       rainfall-specific
+                          features                contributions
+  -----------------------------------------------------------------------
+
+All variants must use the same target definition and comparable
+evaluation periods. If feature construction drops early observations
+because of lag requirements, use a common evaluation window for fair
+comparisons.
+
+Export datasets as separate files or clearly defined feature matrices in
+the modeling pipeline. Preserve the original cleaned data and document
+every engineered feature in a feature dictionary.
+
+## 7. Exact Notebook Execution Plan
+
+Create `06_Feature_Engineering.ipynb` and implement the following
+sections in order.
+
+  -----------------------------------------------------------------------
+  Section                 Task                    Details
+  ----------------------- ----------------------- -----------------------
+  1                       Load files and inspect  Identify existing
+                          schemas                 cleaned metro, weather,
+                                                  and regional datasets
+
+  2                       Validate timestamps and Check hourly alignment,
+                          merge                   duplicates, missing
+                                                  intervals, and row
+                                                  counts
+
+  3                       Define targets          Document ridership
+                                                  target, aggregation
+                                                  level, and prediction
+                                                  timestamp
+
+  4                       Create temporal         Hour, weekday, weekend,
+                          features                peak hour, and cyclical
+                                                  encodings
+
+  5                       Create ridership lags   1h, 2h, 3h, 24h, and
+                                                  168h candidates
+
+  6                       Create rolling          Historical rolling
+                          statistics              means and variability
+                                                  using leakage-safe
+                                                  windows
+
+  7                       Create rainfall         Rainfall lags,
+                          features                accumulations,
+                                                  intensity, and event
+                                                  features
+
+  8                       Add other weather       Selected temperature,
+                          features                humidity, wind, cloud,
+                                                  and visibility
+                                                  variables
+
+  9                       Add regional and        Use the existing
+                          interaction features    regional structure and
+                                                  justified interactions
+
+  10                      Audit and select        Missingness,
+                          features                correlations,
+                                                  distributions, and
+                                                  redundancy
+
+  11                      Create modeling         Export comparable
+                          variants                baseline,
+                                                  weather-enhanced, and
+                                                  regional datasets
+
+  12                      Document outputs        Feature dictionary,
+                                                  data-quality summary,
+                                                  and readiness checks
+  -----------------------------------------------------------------------
+
+## 8. Completion Criteria
+
+Feature engineering is complete when:
+
+-   The forecasting target and observation frequency are unambiguous.
+-   Every feature has a documented definition, unit, and availability
+    time.
+-   Lagged and rolling features have been checked for leakage.
+-   Missing data and dropped rows are accounted for.
+-   Regional features are joined at a defensible geographic level.
+-   Modeling variants are exported and reproducible.
+-   The same chronological evaluation window can be used to compare
+    models.
+
+## 9. Immediate Next Action
+
+Do not begin by generating all features at once. First, inspect the
+exact filenames and columns of the existing cleaned metro, weather, and
+regional datasets.
+
+Then:
+
+1.  Confirm the schema and aggregation level of each dataset.
+2.  Confirm the target variable and prediction horizon.
+3.  Build and validate the hourly master dataset.
+4.  Implement each feature group sequentially.
+5.  Run checks after each section before proceeding.
+
+This will avoid duplicating existing work, making incorrect joins, or
+introducing leakage into the forecasting pipeline.
