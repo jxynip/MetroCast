@@ -10,5 +10,16 @@ dataRaw/
 dataProcessed/
 output/
 
+# Final report figures: keep processed datasets ignored, but version the six
+# rendered figures referenced by Documents/FINAL_RESEARCH_REPORT.md.
+!DataProcessed/
+DataProcessed/*
+!DataProcessed/final_report_fig01_hourly_ridership_pattern.png
+!DataProcessed/final_report_fig02_station_rankings.png
+!DataProcessed/final_report_fig03_hourly_rainfall_distribution.png
+!DataProcessed/final_report_fig04_model_comparison.png
+!DataProcessed/stage12_daily_rainfall_group_comparison.png
+!DataProcessed/stage12_daily_rainfall_association.png
+
 # macOS
 .DS_Store
